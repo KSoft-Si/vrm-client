@@ -1,0 +1,9 @@
+# API endpoints
+BASE_URL = "https://vrmapi.victronenergy.com/v2"
+AUTH_URL = f"{BASE_URL}/auth/login"
+AUTH_DEMO_URL = f"{BASE_URL}/auth/loginAsDemo"
+AUTH_LOGOUT_URL = f"{BASE_URL}/auth/logout"
+FILTERED_SORTED_ATTRIBUTES_URL = f"{BASE_URL}/data-attributes"
+USER_ME_URL = f"{BASE_URL}/users/me"
+USERS_URL = f"{BASE_URL}/users"
+INSTALLATIONS_URL = f"{BASE_URL}/installations"

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="enabledOnReformat" value="true" />
+    <option name="enabledOnSave" value="true" />
+    <option name="pathToExecutable" value="C:\Program Files\Python311\Scripts\black.exe" />
+    <option name="sdkName" value="uv (victron-vrm)" />
+  </component>
+  <component name="KubernetesApiPersistence">
+    <option name="context" value="default" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+</project>
