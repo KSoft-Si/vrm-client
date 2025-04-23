@@ -37,80 +37,28 @@ async def main():
             request_timeout=30,
             max_retries=3,
         ) as client:
-            # Get all sites
+            # Get all sites using the users module
             logger.info("Getting all sites...")
-            sites = await client.get_sites()
-            logger.info(f"Found {sites.total} sites")
+            sites = await client.users.list_sites()
+            logger.info(f"Found {len(sites)} sites")
 
-            if not sites.sites:
+            if not sites:
                 logger.warning("No sites found")
                 return
 
             # Get the first site
-            site = sites.sites[0]
+            site = sites[0]
             logger.info(f"Using site: {site.name} (ID: {site.id})")
 
-            # Get all devices for the site
-            logger.info(f"Getting devices for site {site.id}...")
-            devices = await client.get_devices(site.id)
-            logger.info(f"Found {devices.total} devices")
+            # Get user information
+            logger.info("Getting current user information...")
+            user = await client.users.get_me()
+            logger.info(f"Current user: {user.name} (ID: {user.id}, Email: {user.email})")
 
-            if not devices.devices:
-                logger.warning("No devices found")
-                return
-
-            # Get the first device
-            device = devices.devices[0]
-            logger.info(
-                f"Using device: {device.name} (ID: {device.id}, Type: {device.device_type})"
-            )
-
-            # Get measurements for the device for the last 24 hours
-            start_time = datetime.now() - timedelta(days=1)
-            end_time = datetime.now()
-            logger.info(
-                f"Getting measurements for device {device.id} from {start_time} to {end_time}..."
-            )
-            measurements = await client.get_measurements(
-                site.id, device.id, start=start_time, end=end_time
-            )
-            logger.info(f"Found {measurements.total} measurements")
-
-            # Print the first 5 measurements
-            for i, measurement in enumerate(measurements.measurements[:5]):
-                logger.info(
-                    f"Measurement {i+1}: {measurement.type} = {measurement.value} {measurement.unit or ''} at {measurement.timestamp}"
-                )
-
-            # Get the latest measurement of a specific type (if available)
-            if measurements.measurements:
-                measurement_type = measurements.measurements[0].type
-                logger.info(f"Getting latest measurement of type {measurement_type}...")
-                latest = await client.get_latest_measurement(
-                    site.id, device.id, measurement_type
-                )
-                if latest:
-                    logger.info(
-                        f"Latest {latest.type} = {latest.value} {latest.unit or ''} at {latest.timestamp}"
-                    )
-                else:
-                    logger.warning(f"No latest measurement found for type {measurement_type}")
-
-            # Get system overview for the site
-            logger.info(f"Getting system overview for site {site.id}...")
-            system_overview = await client.get_system_overview(site.id)
-            logger.info(f"Found {len(system_overview.devices)} devices in system overview")
-
-            # Print the first 3 devices in the system overview
-            for i, device in enumerate(system_overview.devices[:3]):
-                logger.info(
-                    f"System device {i+1}: {device.name} (Product: {device.product_name})"
-                )
-
-            # Get alarms for the site
+            # Get alarms for the site using the installations module
             try:
                 logger.info(f"Getting alarms for site {site.id}...")
-                alarms = await client.get_alarms(site.id)
+                alarms = await client.installations.get_alarms(site.id)
                 logger.info(f"Found {len(alarms.alarms)} alarms")
                 logger.info(f"Found {len(alarms.devices)} devices in alarms")
                 logger.info(f"Found {len(alarms.users)} users in alarms")
@@ -124,19 +72,66 @@ async def main():
             except Exception as e:
                 logger.warning(f"Error getting alarms: {e}")
 
-            # Get diagnostics for the site
+            # Get tags for the site
             try:
-                logger.info(f"Getting diagnostics for site {site.id}...")
-                diagnostics = await client.get_diagnostics(site.id)
-                logger.info(f"Found {diagnostics.total} diagnostics records")
+                logger.info(f"Getting tags for site {site.id}...")
+                tags = await client.installations.get_tags(site.id)
+                logger.info(f"Found {len(tags)} tags")
 
-                # Print the first 3 diagnostics records
-                for i, record in enumerate(diagnostics.records[:3]):
-                    logger.info(
-                        f"Diagnostics record {i+1}: {record.description} = {record.formatted_value}"
-                    )
+                # Print the tags
+                for i, tag in enumerate(tags):
+                    logger.info(f"Tag {i+1}: {tag}")
             except Exception as e:
-                logger.warning(f"Error getting diagnostics: {e}")
+                logger.warning(f"Error getting tags: {e}")
+
+            # Get statistics for the site
+            try:
+                # Get statistics for the last 24 hours
+                start_time = datetime.now() - timedelta(days=1)
+                end_time = datetime.now()
+                logger.info(f"Getting statistics for site {site.id} from {start_time} to {end_time}...")
+
+                stats = await client.installations.stats(
+                    site.id, 
+                    start=start_time,
+                    end=end_time,
+                    interval="hours"
+                )
+                logger.info(f"Found statistics with {len(stats['records'])} records")
+
+                # Print some statistics information
+                if stats['records']:
+                    logger.info(f"First record timestamp: {stats['records'][0].get('timestamp', 'N/A')}")
+                if stats['totals']:
+                    logger.info(f"Totals: {stats['totals']}")
+            except Exception as e:
+                logger.warning(f"Error getting statistics: {e}")
+
+            # Get timezone for the site
+            try:
+                logger.info(f"Getting timezone for site {site.id}...")
+                timezone = await client.installations.get_python_timezone(site.id)
+                logger.info(f"Site timezone: {timezone}")
+            except Exception as e:
+                logger.warning(f"Error getting timezone: {e}")
+
+            # Create an access token (example only - commented out to avoid creating tokens)
+            # logger.info("Creating an access token...")
+            # token_name = f"Example Token {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # token = await client.users.create_access_token(token_name)
+            # logger.info(f"Created token: {token}")
+
+            # List access tokens
+            try:
+                logger.info("Listing access tokens...")
+                tokens = await client.users.list_access_tokens()
+                logger.info(f"Found {len(tokens)} access tokens")
+
+                # Print the first 3 tokens
+                for i, token in enumerate(tokens[:3]):
+                    logger.info(f"Token {i+1}: {token.get('name', 'N/A')} (ID: {token.get('id', 'N/A')})")
+            except Exception as e:
+                logger.warning(f"Error listing access tokens: {e}")
 
     # Example 2: Using token authentication
     logger.info("\nExample 2: Using token authentication")
@@ -151,23 +146,26 @@ async def main():
         request_timeout=30,
         max_retries=3,
     ) as client:
-        # Get all sites
+        # Get all sites using the users module
         logger.info("Getting all sites...")
-        sites = await client.get_sites()
-        logger.info(f"Found {sites.total} sites")
+        sites = await client.users.list_sites()
+        logger.info(f"Found {len(sites)} sites")
 
-        if not sites.sites:
+        if not sites:
             logger.warning("No sites found")
             return
 
         # Get the first site
-        site = sites.sites[0]
+        site = sites[0]
         logger.info(f"Using site: {site.name} (ID: {site.id})")
 
-        # Get all devices for the site
-        logger.info(f"Getting devices for site {site.id}...")
-        devices = await client.get_devices(site.id)
-        logger.info(f"Found {devices.total} devices")
+        # Get alarms for the site using the installations module
+        try:
+            logger.info(f"Getting alarms for site {site.id}...")
+            alarms = await client.installations.get_alarms(site.id)
+            logger.info(f"Found {len(alarms.alarms)} alarms")
+        except Exception as e:
+            logger.warning(f"Error getting alarms: {e}")
 
 
 if __name__ == "__main__":

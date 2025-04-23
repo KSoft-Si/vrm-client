@@ -2,11 +2,10 @@ name: CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '*' ]
     tags:
       - 'v*'
   pull_request:
-    branches: [ main ]
 
 jobs:
   test:
@@ -29,7 +28,7 @@ jobs:
 
     - name: Install dependencies with uv
       run: |
-        uv pip install -e ".[test,dev]"
+        uv pip install --system -e ".[test,dev]"
 
     - name: Run linting with ruff
       run: |
@@ -144,7 +143,7 @@ jobs:
 
     - name: Install build dependencies
       run: |
-        uv pip install -e ".[dev]" build hatch
+        uv pip install --system -e ".[dev]" build hatch
 
     - name: Build package
       run: |

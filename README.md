@@ -30,12 +30,12 @@ python examples/demo.py
 
 This script will:
 1. Get a demo token using the `/auth/loginAsDemo` endpoint
-2. Get all sites available in the demo account
-3. Get devices for the first site
-4. Get measurements for the first device
-5. Get system overview for the site
-6. Get alarms for the site
-7. Get diagnostics for the site
+2. Get all sites available in the demo account using the users module
+3. Get user information
+4. Get alarms for the site using the installations module
+5. Get tags for the site
+6. Get statistics for the site
+7. Get timezone for the site
 
 ### Basic Usage
 
@@ -50,15 +50,16 @@ async def main():
         password="your_password",
         client_id="your_client_id",
     ) as client:
-        # Get all sites
-        sites = await client.get_sites()
-        print(f"Found {sites.total} sites")
+        # Get all sites using the users module
+        sites = await client.users.list_sites()
+        print(f"Found {len(sites)} sites")
 
-        # Get devices for a site
-        if sites.sites:
-            site = sites.sites[0]
-            devices = await client.get_devices(site.id)
-            print(f"Found {devices.total} devices for site {site.name}")
+        # Get a specific site
+        if sites:
+            site = sites[0]
+            # Get alarms for the site using the installations module
+            alarms = await client.installations.get_alarms(site.id)
+            print(f"Found {len(alarms.alarms)} alarms for site {site.name}")
 
     # Alternatively, create the client with a token
     async with VictronVRMClient(
@@ -66,8 +67,8 @@ async def main():
         token_type="Bearer",  # or "Token" for access tokens
     ) as client:
         # Get all sites
-        sites = await client.get_sites()
-        print(f"Found {sites.total} sites")
+        sites = await client.users.list_sites()
+        print(f"Found {len(sites)} sites")
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -103,8 +104,13 @@ async def setup_victron_vrm(hass, config):
     else:
         raise ValueError("Either username/password/client_id or token must be provided")
 
-    # Get data from the API
-    sites = await client.get_sites()
+    # Get data from the API using the modular approach
+    sites = await client.users.list_sites()
+
+    # Get alarms for the first site
+    if sites:
+        site = sites[0]
+        alarms = await client.installations.get_alarms(site.id)
 
     # Do something with the data
     # ...
@@ -132,35 +138,38 @@ VictronVRMClient(
 
 Either `username`, `password`, and `client_id` OR `token` must be provided. The `token_type` can be either "Bearer" (for JWT tokens) or "Token" (for access tokens).
 
-### Available Methods
+### Available Modules
 
-#### Sites
+The client is designed with a modular approach, organizing API endpoints into logical modules:
 
-- `get_sites(page: int = 1, per_page: int = 100) -> SiteList`
-- `get_site(site_id: Union[int, str]) -> Site`
+#### Users Module
 
-#### Devices
+Access via `client.users`:
 
-- `get_devices(site_id: Union[int, str], page: int = 1, per_page: int = 100) -> DeviceList`
-- `get_device(site_id: Union[int, str], device_id: Union[int, str]) -> Device`
+- `get_me() -> User`: Get the current user
+- `add_site(installation_identifier: str) -> dict[str, str]`: Add a new site
+- `list_sites(extended: bool = False, site_id: int | None = None) -> list[Site]`: List all sites
+- `get_site(site_id: int, extended: bool = False) -> Site | None`: Get a specific site
+- `create_access_token(name: str, expiry: Optional[int | datetime] = None) -> str`: Create an access token
+- `list_access_tokens() -> list[AccessToken]`: List all access tokens
+- `revoke_access_token(token_id: int | AccessToken) -> bool`: Revoke an access token
+- `get_site_id_from_identifier(installation_identifier: str) -> Optional[int]`: Get site ID from identifier
+- `search(query: str) -> list[dict[str, Any]]`: Search for users
 
-#### Measurements
+#### Installations Module
 
-- `get_measurements(site_id: Union[int, str], device_id: Union[int, str], start: Optional[Union[datetime, str]] = None, end: Optional[Union[datetime, str]] = None, page: int = 1, per_page: int = 100) -> MeasurementList`
-- `get_latest_measurement(site_id: Union[int, str], device_id: Union[int, str], measurement_type: str) -> Optional[Measurement]`
+Access via `client.installations`:
 
-#### System Overview
-
-- `get_system_overview(site_id: Union[int, str]) -> SystemOverview`
-
-#### Alarms
-
-- `get_alarms(site_id: Union[int, str]) -> Alarms`
-- `clear_alarm(site_id: Union[int, str], alarm_id: Union[int, str]) -> bool`
-
-#### Diagnostics
-
-- `get_diagnostics(site_id: Union[int, str], page: int = 1, per_page: int = 100) -> DiagnosticsList`
+- `get_alarms(site_id: int | Site) -> Alarms`: Get alarms for a site
+- `add_alarm(site_id: int | Site, alarm: AlarmSettings) -> None`: Add an alarm to a site
+- `delete_alarm(site_id: int | Site, alarm: AlarmSettings) -> None`: Delete an alarm from a site
+- `update_alarm(site_id: int | Site, alarm: AlarmSettings) -> AlarmSettings`: Update an alarm
+- `clear_alarm(site_id: int | Site, alarm: AlarmSettings | int) -> None`: Clear an alarm
+- `get_tags(site_id: int | Site) -> list[str]`: Get tags for a site
+- `add_tag(site_id: int | Site, tag: str) -> None`: Add a tag to a site
+- `delete_tag(site_id: int | Site, tag: str) -> None`: Delete a tag from a site
+- `stats(site_id: int | Site, ...) -> dict`: Get statistics for a site
+- `get_python_timezone(site_id: int | Site) -> Any`: Get the Python timezone for a site
 
 ## Error Handling
 
@@ -237,9 +246,9 @@ See the [tests/README.md](tests/README.md) file for more information about the t
 
 This project uses GitHub Actions for continuous integration and deployment:
 
-- **Automated Testing**: All pull requests and pushes to the main branch are automatically tested against Python 3.11, 3.12, and 3.13.
+- **Automated Testing**: All pull requests and pushes to all branches are automatically tested against Python 3.11, 3.12, and 3.13.
 - **Automatic Versioning**: When code is pushed to the main branch, the version is automatically incremented (patch version), a new tag is created, and a GitHub release is generated.
-- **Package Publishing**: When a new version tag is created (either automatically or manually), the package is automatically built and published to PyPI.
+- **Package Publishing**: When code is pushed to the main branch, the package is automatically built and published to PyPI.
 
 The workflow uses `uv` instead of `pip` for faster and more reliable dependency management.
 
@@ -252,7 +261,7 @@ The project is configured with automatic versioning and releases:
    - Commits the version change
    - Creates a new tag (e.g., v0.1.1)
    - Creates a GitHub release with automatically generated release notes
-   - Triggers the CI/CD workflow to build and publish the package to PyPI
+   - Builds and publishes the package to PyPI
 
 This means you don't need to manually update versions or create tags for routine updates.
 
