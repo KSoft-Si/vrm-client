@@ -6,6 +6,7 @@ import pytz
 from ._base import BaseClientModule
 from .. import consts
 from ..models import Site, Alarms, AlarmSettings
+from ..models.aggregations import ForecastAggregations
 from ..utils import is_dt_timezone_aware
 
 
@@ -180,7 +181,11 @@ class InstallationsModule(BaseClientModule):
             "forecast",
         ] = "live_feed",
         attribute_codes: list[str] | None = None,
-    ) -> dict[Literal["records", "totals"], dict]:
+        return_aggregations: bool = False,
+    ) -> (
+        dict[Literal["records", "totals"], dict]
+        | dict[Literal["solar_yield", "consumption"], ForecastAggregations | None]
+    ):
         """
         Get statistics for a specific site.
 
@@ -190,8 +195,12 @@ class InstallationsModule(BaseClientModule):
         :param interval: The interval for the statistics.
         :param type: The type of statistics to retrieve.
         :param attribute_codes: Optional list of attribute codes to filter the statistics.
+        :param return_aggregations: Whether to return a ForecastAggregations object (only valid when type is 'forecast').
         :return: A dictionary containing the statistics.
         """
+        assert (
+            type == "forecast" or not return_aggregations
+        ), "return_aggregations can only be True when type is 'forecast'"
         if isinstance(site_id, Site):
             site_id = site_id.id
 
@@ -216,10 +225,30 @@ class InstallationsModule(BaseClientModule):
                 "attributeCodes": attribute_codes,
             },
         )
-        return {
+        payload: dict[Literal["records", "totals"], dict] = {
             "records": request["records"],
             "totals": request["totals"],
         }
+        if type == "forecast" and return_aggregations:
+            payload: dict[
+                Literal["solar_yield", "consumption"], ForecastAggregations | None
+            ] = {}
+            for key, map_key in {
+                "solar_yield_forecast": "solar_yield",
+                "vrm_consumption_fc": "consumption",
+            }.items():
+                if key in request["records"] and request["records"][key] is not None:
+                    payload[map_key] = ForecastAggregations(
+                        start=start,
+                        end=end,
+                        site_id=site_id,
+                        records=[
+                            (int(x / 1000), y) for x, y in request["records"][key]
+                        ],
+                    )
+                else:
+                    payload[map_key] = None
+        return payload
 
     async def get_python_timezone(self, site_id: int | Site) -> Any:
         """
