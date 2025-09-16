@@ -25,6 +25,12 @@ from .models import VRMAttributes, AuthToken
 from .modules import UsersModule, InstallationsModule
 
 _LOGGER = logging.getLogger(__name__)
+__all__ = ["VictronVRMClient"]
+
+
+def is_jwt(token: str) -> bool:
+    """Return True if token looks like a JWT."""
+    return token.count(".") == 2
 
 
 class VictronVRMClient:
@@ -38,7 +44,7 @@ class VictronVRMClient:
         password: Optional[str] = None,
         client_id: Optional[str] = None,
         token: Optional[str] = None,
-        token_type: Literal["Bearer", "Token"] = "Bearer",
+        token_type: Optional[Literal["Bearer", "Token"]] = None,
         client_session: Optional[httpx.AsyncClient] = None,
         request_timeout: int = 10,
         max_retries: int = 3,
@@ -61,6 +67,11 @@ class VictronVRMClient:
             raise ValueError(
                 "Either username, password, and client_id OR token must be provided"
             )
+
+        if token is not None and token_type is None:
+            token_type = "Bearer" if is_jwt(token or "") else "Token"
+        elif token_type is None:
+            token_type = "Bearer"
 
         if token_type not in ["Bearer", "Token"]:
             raise ValueError("token_type must be either 'Bearer' or 'Token'")
