@@ -1,14 +1,16 @@
 """Victron Energy VRM API client."""
 
 import asyncio
+import json
 import logging
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Literal
 
-import httpx
+import aiohttp
 from pydantic import ValidationError
 
-from .consts import AUTH_URL, USER_ME_URL, FILTERED_SORTED_ATTRIBUTES_URL
+from .consts import AUTH_URL, USER_ME_URL, FILTERED_SORTED_ATTRIBUTES_URL, BASE_URL
 from .exceptions import (
     AuthenticationError,
     AuthorizationError,
@@ -45,7 +47,7 @@ class VictronVRMClient:
         client_id: Optional[str] = None,
         token: Optional[str] = None,
         token_type: Optional[Literal["Bearer", "Token"]] = None,
-        client_session: Optional[httpx.AsyncClient] = None,
+        client_session: Optional[aiohttp.ClientSession] = None,
         request_timeout: int = 10,
         max_retries: int = 3,
         retry_delay: int = 1,
@@ -58,7 +60,7 @@ class VictronVRMClient:
             client_id: VRM API client ID (required if token not provided)
             token: Authentication token (required if username/password not provided)
             token_type: Token type, either 'Bearer' or 'Token' (default: 'Bearer')
-            client_session: Optional httpx AsyncClient session
+            client_session: Optional aiohttp ClientSession
             request_timeout: Request timeout in seconds
             max_retries: Maximum number of retries for failed requests
             retry_delay: Delay between retries in seconds
@@ -90,21 +92,32 @@ class VictronVRMClient:
         self._user_id: Optional[int] = None
         self._filtered_sorted_attributes: Optional[VRMAttributes] = None
 
+    def _build_url(self, url: str) -> str:
+        """Build an absolute URL from a relative API path or return as-is if absolute."""
+        if url.startswith("http://") or url.startswith("https://"):
+            return url
+        return f"{BASE_URL.rstrip('/')}/{url.lstrip('/')}"
+
     async def __aenter__(self) -> "VictronVRMClient":
         """Async enter."""
         if self._client_session is None:
-            self._client_session = httpx.AsyncClient()
+            self._client_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self._request_timeout)
+            )
             self._close_session = True
         return self
 
     async def __aexit__(self, *exc_info) -> None:
         """Async exit."""
+        await self.close()
+
+    async def close(self) -> None:
+        """Close the underlying HTTP session if we own it."""
         if self._close_session and self._client_session:
             try:
-                if not self._client_session.is_closed:
-                    await self._client_session.aclose()
+                if not self._client_session.closed:
+                    await self._client_session.close()
             except RuntimeError:
-                # Ignore RuntimeError if the session is already closed
                 _LOGGER.debug("Client session or asyncio loop already closed")
             self._client_session = None
             self._close_session = False
@@ -122,12 +135,13 @@ class VictronVRMClient:
             return self._auth_token
 
         if not self._client_session:
-            self._client_session = httpx.AsyncClient()
+            self._client_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self._request_timeout)
+            )
             self._close_session = True
 
         # If a token was provided directly, create an AuthToken from it
         if self._token:
-            # Create a simple AuthToken with a long expiration time
             self._auth_token = AuthToken(
                 access_token=self._token,
                 token_type=self._token_type,
@@ -135,7 +149,7 @@ class VictronVRMClient:
                     3600 * 24 * 30
                     if self._token_type == "Bearer"
                     else 3600 * 24 * 365 * 999
-                ),  # 30 days
+                ),
                 scope="read",
                 created_at=datetime.now(),
             )
@@ -150,32 +164,42 @@ class VictronVRMClient:
         }
 
         try:
-            response = await self._client_session.post(
-                AUTH_URL,
+            async with self._client_session.post(
+                self._build_url(AUTH_URL),
                 data=auth_data,
-                timeout=self._request_timeout,
                 headers={
                     "User-Agent": self.USER_AGENT,
                 },
-            )
-            response.raise_for_status()
-            token_data = response.json()
-            self._auth_token = AuthToken(**token_data)
-            return self._auth_token
-        except httpx.HTTPStatusError as err:
-            status_code = err.response.status_code
-            try:
-                response_data = err.response.json()
-            except ValueError:
-                response_data = {"error": err.response.text}
+            ) as response:
+                text = await response.text()
+                status_code = response.status
+                # Try to parse JSON if present
+                try:
+                    payload = json.loads(text) if text else {}
+                except json.JSONDecodeError:
+                    payload = {"raw": text}
 
-            error_message = response_data.get("error", "Authentication failed")
-            raise AuthenticationError(
-                f"Authentication failed: {error_message}",
-                status_code=status_code,
-                response_data=response_data,
-            ) from err
-        except httpx.RequestError as err:
+                if 200 <= status_code < 300:
+                    if not isinstance(payload, dict):
+                        raise ParseError(
+                            f"Expected JSON object for auth response, got: {type(payload)}"
+                        )
+                    self._auth_token = AuthToken(**payload)
+                    return self._auth_token
+                # Non-2xx -> build error
+                error_message = (
+                    payload.get("error")
+                    if isinstance(payload, dict)
+                    else (text or "Authentication failed")
+                )
+                raise AuthenticationError(
+                    f"Authentication failed: {error_message}",
+                    status_code=status_code,
+                    response_data=(
+                        payload if isinstance(payload, dict) else {"raw": text}
+                    ),
+                )
+        except aiohttp.ClientError as err:
             raise ConnectionError(f"Connection error: {err}") from err
         except ValidationError as err:
             raise ParseError(f"Failed to parse authentication response: {err}") from err
@@ -217,7 +241,7 @@ class VictronVRMClient:
 
         Args:
             method: HTTP method
-            url: Request URL
+            url: Request URL (relative to BASE_URL or absolute)
             params: Query parameters
             data: Form data
             json_data: JSON data
@@ -231,11 +255,17 @@ class VictronVRMClient:
             VictronVRMError: If the request fails
         """
         if not self._client_session:
-            self._client_session = httpx.AsyncClient()
+            self._client_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self._request_timeout)
+            )
             self._close_session = True
 
         if not headers:
             headers = {}
+
+        if params:
+            # Remove None values from params
+            params = {k: v for k, v in params.items() if v is not None}
 
         if auth_required:
             token = await self._get_auth_token()
@@ -247,125 +277,199 @@ class VictronVRMClient:
         request_data = data or {}
         request_json = json_data or {}
 
+        full_url = self._build_url(url)
+
         for attempt in range(self._max_retries):
             try:
-                response = await self._client_session.request(
+                async with self._client_session.request(
                     method,
-                    url,
+                    full_url,
                     params=request_params,
                     data=request_data or None,
                     json=request_json or None,
                     headers=request_headers,
-                    timeout=self._request_timeout,
-                )
-                response.raise_for_status()
-                response_data = response.json()
+                ) as response:
+                    status_code = response.status
+                    text = await response.text()
+                    # Try JSON parse either way
+                    try:
+                        response_data = json.loads(text) if text else {}
+                    except json.JSONDecodeError:
+                        response_data = {"raw": text}
 
-                # Check the success key in the response
-                if (
-                    "success" in response_data
-                    and not response_data["success"]
-                    and not skip_success_check
-                ):
-                    errors = response_data.get("errors", "Unknown error")
-                    error_code = response_data.get("error_code")
-                    error_message = f"API error: {errors}"
-                    if error_code:
-                        error_message += f" (code: {error_code})"
+                    # 2xx path
+                    if 200 <= status_code < 300:
+                        if (
+                            "success" in response_data
+                            and not response_data["success"]
+                            and not skip_success_check
+                        ):
+                            errors = response_data.get("errors", "Unknown error")
+                            error_code = response_data.get("error_code")
+                            error_message = f"API error: {errors}"
+                            if error_code:
+                                error_message += f" (code: {error_code})"
+                            raise VictronVRMError(
+                                error_message,
+                                status_code=status_code,
+                                response_data=response_data,
+                            )
+                        return response_data
 
-                    raise VictronVRMError(
-                        error_message,
-                        status_code=response.status_code,
-                        response_data=response_data,
-                    )
-
-                return response_data
-            except httpx.HTTPStatusError as err:
-                status_code = err.response.status_code
-                try:
-                    response_data = err.response.json()
-                    # Check for success key and error details in error responses
-                    if "success" in response_data and not response_data["success"]:
+                    # Non-2xx path: map errors by status code
+                    # Prefer structured error from payload if available
+                    if (
+                        isinstance(response_data, dict)
+                        and "success" in response_data
+                        and not response_data["success"]
+                    ):
                         errors = response_data.get("errors", "Unknown error")
                         error_code = response_data.get("error_code")
                         error_message = f"API error: {errors}"
                         if error_code:
                             error_message += f" (code: {error_code})"
                     else:
-                        error_message = response_data.get(
-                            "error", f"HTTP error {status_code}"
+                        error_message = (
+                            response_data.get("error")
+                            if isinstance(response_data, dict)
+                            else (text or f"HTTP error {status_code}")
                         )
-                except ValueError:
-                    response_data = {"error": err.response.text}
-                    error_message = f"HTTP error {status_code}: {err.response.text}"
 
-                # Handle specific error codes
-                if status_code == 401:
-                    # Token might be expired, try to refresh and retry
-                    if auth_required and attempt < self._max_retries - 1:
-                        self._auth_token = None
-                        await asyncio.sleep(self._retry_delay)
-                        continue
-                    raise AuthenticationError(
-                        f"Authentication failed: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                elif status_code == 403:
-                    raise AuthorizationError(
-                        f"Not authorized: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                elif status_code == 404:
-                    raise NotFoundError(
-                        f"Resource not found: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                elif status_code == 429:
-                    if attempt < self._max_retries - 1:
-                        retry_after = int(
-                            err.response.headers.get("Retry-After", self._retry_delay)
+                    if status_code == 401:
+                        if auth_required and attempt < self._max_retries - 1:
+                            self._auth_token = None
+                            await asyncio.sleep(self._retry_delay)
+                            continue
+                        raise AuthenticationError(
+                            f"Authentication failed: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
                         )
-                        await asyncio.sleep(retry_after)
-                        continue
-                    raise RateLimitError(
-                        f"Rate limit exceeded: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                elif 400 <= status_code < 500:
-                    raise ClientError(
-                        f"Client error: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                elif 500 <= status_code < 600:
-                    if attempt < self._max_retries - 1:
-                        await asyncio.sleep(self._retry_delay * (attempt + 1))
-                        continue
-                    raise ServerError(
-                        f"Server error: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-                else:
-                    raise VictronVRMError(
-                        f"HTTP error {status_code}: {error_message}",
-                        status_code=status_code,
-                        response_data=response_data,
-                    ) from err
-            except httpx.TimeoutException as err:
+                    elif status_code == 403:
+                        raise AuthorizationError(
+                            f"Not authorized: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+                    elif status_code == 404:
+                        raise NotFoundError(
+                            f"Resource not found: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+                    elif status_code == 429:
+                        if attempt < self._max_retries - 1:
+                            # retry-after header or backoff
+                            retry_after_hdr = response.headers.get("Retry-After")
+                            retry_after: int
+                            if retry_after_hdr and retry_after_hdr.isdigit():
+                                retry_after = int(retry_after_hdr)
+                            else:
+                                try:
+                                    dt = (
+                                        parsedate_to_datetime(retry_after_hdr)
+                                        if retry_after_hdr
+                                        else None
+                                    )
+                                except (TypeError, ValueError):
+                                    dt = None
+                                if dt is not None:
+                                    now = (
+                                        datetime.now(tz=dt.tzinfo)
+                                        if dt.tzinfo
+                                        else datetime.utcnow()
+                                    )
+                                    delta = (dt - now).total_seconds()
+                                    retry_after = max(0, int(delta))
+                                else:
+                                    retry_after = self._retry_delay
+                            _LOGGER.debug(
+                                "429 received, retrying after %s seconds (attempt %s)",
+                                retry_after,
+                                attempt + 1,
+                            )
+                            await asyncio.sleep(retry_after)
+                            continue
+                        raise RateLimitError(
+                            f"Rate limit exceeded: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+                    elif 400 <= status_code < 500:
+                        raise ClientError(
+                            f"Client error: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+                    elif 500 <= status_code < 600:
+                        if attempt < self._max_retries - 1:
+                            await asyncio.sleep(self._retry_delay * (attempt + 1))
+                            continue
+                        raise ServerError(
+                            f"Server error: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+                    else:
+                        raise VictronVRMError(
+                            f"HTTP error {status_code}: {error_message}",
+                            status_code=status_code,
+                            response_data=(
+                                response_data
+                                if isinstance(response_data, dict)
+                                else {"raw": text}
+                            ),
+                        )
+            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as err:
                 if attempt < self._max_retries - 1:
+                    _LOGGER.debug(
+                        "Timeout on %s %s, retrying (attempt %s)",
+                        method,
+                        full_url,
+                        attempt + 1,
+                    )
                     await asyncio.sleep(self._retry_delay * (attempt + 1))
                     continue
                 raise TimeoutError(f"Request timed out: {err}") from err
-            except httpx.RequestError as err:
+            except aiohttp.ClientError as err:
                 if attempt < self._max_retries - 1:
+                    _LOGGER.debug(
+                        "ClientError on %s %s, retrying (attempt %s): %s",
+                        method,
+                        full_url,
+                        attempt + 1,
+                        err,
+                    )
                     await asyncio.sleep(self._retry_delay * (attempt + 1))
                     continue
                 raise ConnectionError(f"Connection error: {err}") from err
+            except VictronVRMError:
+                # Bubble up already-mapped API errors without wrapping
+                raise
             except Exception as err:
                 raise VictronVRMError(f"Unexpected error: {err}") from err
 

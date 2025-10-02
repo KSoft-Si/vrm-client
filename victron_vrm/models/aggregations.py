@@ -17,6 +17,8 @@ class ForecastAggregations:
 
     def __post_init__(self) -> None:
         """Post-initialize the ForecastEstimates class."""
+        if len(self.records) == 0:
+            return
         if self.start != min(x[0] for x in self.records):
             self.start = min(x[0] for x in self.records)
         if self.end != max(x[0] for x in self.records):
