@@ -229,6 +229,14 @@ class InstallationsModule(BaseClientModule):
             "records": request["records"],
             "totals": request["totals"],
         }
+        if isinstance(payload["totals"], dict):
+            for k, v in payload["totals"].items():
+                if v is False:
+                    payload["totals"][k] = None
+        if isinstance(payload["records"], dict):
+            for k, v in payload["records"].items():
+                if v is False:
+                    payload["records"][k] = None
         if type == "forecast" and return_aggregations:
             payload: dict[
                 Literal["solar_yield", "consumption"], ForecastAggregations | None
@@ -238,6 +246,9 @@ class InstallationsModule(BaseClientModule):
                 "vrm_consumption_fc": "consumption",
             }.items():
                 if key in request["records"] and request["records"][key] is not None:
+                    if len(request["records"][key]) == 0:
+                        payload[map_key] = None
+                        continue
                     payload[map_key] = ForecastAggregations(
                         start=start,
                         end=end,

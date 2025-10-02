@@ -1,6 +1,9 @@
 """Tests for the Victron Energy VRM API client."""
 
 import logging
+import traceback
+
+import aiohttp
 import pytest
 import httpx
 import random
@@ -20,27 +23,24 @@ logger = logging.getLogger(__name__)
 AUTH_DEMO_URL = "https://vrmapi.victronenergy.com/v2/auth/loginAsDemo"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def demo_token():
-    """Get a demo token for testing."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(AUTH_DEMO_URL)
-        response.raise_for_status()
-        data = response.json()
-        token = data.get("token")
-        if not token:
-            pytest.skip("Failed to get demo token")
-        return token
+    """Get a demo token for testing (session-scoped to avoid 429s)."""
+    async with aiohttp.ClientSession() as client:
+        async with client.get(AUTH_DEMO_URL) as response:
+            response.raise_for_status()
+            data = await response.json()
+    token = data.get("token")
+    if not token:
+        pytest.skip("Failed to get demo token")
+    return token
 
 
 @pytest.fixture
 async def vrm_client(demo_token):
     """Create a VictronVRMClient with the demo token."""
     async with VictronVRMClient(
-        token=demo_token,
-        token_type="Bearer",
-        request_timeout=30,
-        max_retries=3
+        token=demo_token, token_type="Bearer", request_timeout=30, max_retries=3
     ) as client:
         yield client
 
@@ -58,7 +58,9 @@ async def test_site(vrm_client):
         logger.info(f"Using ESS installation: {ess_site.name} (ID: {ess_site.id})")
         return ess_site
     elif sites:
-        logger.info(f"ESS installation not found, using first installation: {sites[0].name} (ID: {sites[0].id})")
+        logger.info(
+            f"ESS installation not found, using first installation: {sites[0].name} (ID: {sites[0].id})"
+        )
         return sites[0]
     else:
         pytest.skip("No installations available for testing")
@@ -127,14 +129,20 @@ async def test_get_site_id_from_identifier(vrm_client):
 
         # Select a random site
         random_site = random.choice(sites)
-        logger.info(f"Selected random site: {random_site.name} (ID: {random_site.id}, Identifier: {random_site.identifier})")
+        logger.info(
+            f"Selected random site: {random_site.name} (ID: {random_site.id}, Identifier: {random_site.identifier})"
+        )
 
         # Get site ID from identifier
-        site_id = await vrm_client.users.get_site_id_from_identifier(random_site.identifier)
+        site_id = await vrm_client.users.get_site_id_from_identifier(
+            random_site.identifier
+        )
         assert site_id is not None
         assert site_id == random_site.id
 
-        logger.info(f"Retrieved site ID: {site_id} from identifier: {random_site.identifier}")
+        logger.info(
+            f"Retrieved site ID: {site_id} from identifier: {random_site.identifier}"
+        )
         return site_id
     except AuthorizationError as e:
         logger.info(f"AuthorizationError received as expected: {e}")
@@ -153,7 +161,9 @@ async def test_get_alarms(vrm_client, test_site):
         assert hasattr(alarms, "users")
         assert hasattr(alarms, "attributes")
 
-        logger.info(f"Found {len(alarms.alarms)} alarms for site {test_site.name} (ID: {test_site.id})")
+        logger.info(
+            f"Found {len(alarms.alarms)} alarms for site {test_site.name} (ID: {test_site.id})"
+        )
         logger.info(f"Found {len(alarms.devices)} devices in alarms")
         logger.info(f"Found {len(alarms.users)} users in alarms")
         logger.info(f"Found {len(alarms.attributes)} attributes in alarms")
@@ -165,7 +175,9 @@ async def test_get_alarms(vrm_client, test_site):
         return None
     except VictronVRMError as e:
         # Some demo sites might not have alarms enabled
-        logger.warning(f"Error getting alarms for site {test_site.name} (ID: {test_site.id}): {e}")
+        logger.warning(
+            f"Error getting alarms for site {test_site.name} (ID: {test_site.id}): {e}"
+        )
         pytest.skip(f"Error getting alarms: {e}")
 
 
@@ -177,7 +189,9 @@ async def test_get_tags(vrm_client, test_site):
         assert tags is not None
         assert isinstance(tags, list)
 
-        logger.info(f"Found {len(tags)} tags for site {test_site.name} (ID: {test_site.id})")
+        logger.info(
+            f"Found {len(tags)} tags for site {test_site.name} (ID: {test_site.id})"
+        )
         for tag in tags:
             logger.info(f"Tag: {tag}")
 
@@ -187,7 +201,9 @@ async def test_get_tags(vrm_client, test_site):
         # Test is successful if AuthorizationError is received
         return None
     except VictronVRMError as e:
-        logger.warning(f"Error getting tags for site {test_site.name} (ID: {test_site.id}): {e}")
+        logger.warning(
+            f"Error getting tags for site {test_site.name} (ID: {test_site.id}): {e}"
+        )
         pytest.skip(f"Error getting tags: {e}")
 
 
@@ -201,8 +217,13 @@ async def test_stats(vrm_client):
             pytest.skip("No sites available for testing")
 
         # Select a random site
-        random_site = random.choice(sites)
-        logger.info(f"Selected random site for stats: {random_site.name} (ID: {random_site.id})")
+        valid_sites = [site for site in sites if site.id is not None]
+        if not valid_sites:
+            pytest.skip("No valid sites with IDs available for testing")
+        random_site = random.choice(valid_sites)
+        logger.info(
+            f"Selected random site for stats: {random_site.name} (ID: {random_site.id})"
+        )
 
         # Get stats with default options
         stats = await vrm_client.installations.stats(random_site.id)
@@ -210,15 +231,147 @@ async def test_stats(vrm_client):
         assert isinstance(stats, dict)
         assert "records" in stats
         assert "totals" in stats
-
-        logger.info(f"Retrieved stats for site {random_site.name} (ID: {random_site.id})")
-        logger.info(f"Stats contains {len(stats['records'])} records and {len(stats['totals'])} totals")
-
-        return stats
     except AuthorizationError as e:
         logger.info(f"AuthorizationError received as expected: {e}")
         # Test is successful if AuthorizationError is received
         return None
     except VictronVRMError as e:
         logger.warning(f"Error getting stats for site: {e}")
-        pytest.skip(f"Error getting stats: {e}")
+        pytest.fail(f"Error getting stats: {e}")
+        raise e
+
+    # Validate the structure of records and totals
+    records = stats["records"]
+    totals = stats["totals"]
+
+    # Records and totals can be either dict or list depending on the API response
+    assert isinstance(records, (dict, list)), "Records should be a dictionary or list"
+    assert isinstance(totals, (dict, list)), "Totals should be a dictionary or list"
+
+    # If records is a dict, validate its values
+    if isinstance(records, dict):
+        for key, value in records.items():
+            assert value is None or isinstance(
+                value, list
+            ), f"Records[{key}] should be None or list, got {type(value)}: {value}"
+            assert (
+                value is not False
+            ), f"Records[{key}] should not be False - client should transform False to None"
+            logger.debug(f"Records[{key}] = {value} (type: {type(value)})")
+    else:
+        # Records is a list - validate it's a proper list
+        assert isinstance(records, list), "Records should be a list when not a dict"
+        logger.debug(f"Records is a list with {len(records)} items")
+
+    # If totals is a dict, validate its values
+    if isinstance(totals, dict):
+        for key, value in totals.items():
+            assert value is None or isinstance(
+                value, (int, float)
+            ), f"Totals[{key}] should be None, int, or float, got {type(value)}: {value}"
+            assert (
+                value is not False
+            ), f"Totals[{key}] should not be False - client should transform False to None"
+            logger.debug(f"Totals[{key}] = {value} (type: {type(value)})")
+    else:
+        # Totals is a list - validate it's a proper list
+        assert isinstance(totals, list), "Totals should be a list when not a dict"
+        logger.debug(f"Totals is a list with {len(totals)} items")
+
+    logger.info(f"Retrieved stats for site {random_site.name} (ID: {random_site.id})")
+    logger.info(f"Records type: {type(records)}, Totals type: {type(totals)}")
+
+    return stats
+
+
+@pytest.mark.asyncio
+async def test_stats_false_to_none_transformation(vrm_client):
+    """Test that the client transforms false values to None in stats response."""
+    import unittest.mock
+
+    try:
+        # Get all sites
+        sites = await vrm_client.users.list_sites()
+        if not sites:
+            pytest.skip("No sites available for testing")
+
+        # Select a random site
+        random_site = random.choice(sites)
+        logger.info(
+            f"Testing false-to-None transformation for site: {random_site.name} (ID: {random_site.id})"
+        )
+
+        # Mock the API response with false values
+        mock_api_response = {
+            "success": True,
+            "records": {
+                "solar_yield_forecast": False,
+                "vrm_consumption_fc": False,
+                "some_other_field": [1, 2, 3],  # Should remain unchanged
+            },
+            "totals": {
+                "solar_yield_forecast": False,
+                "vrm_consumption_fc": False,
+                "some_numeric_field": 123.45,  # Should remain unchanged
+            },
+        }
+
+        # Mock the _request method directly on the VictronVRMClient
+        with unittest.mock.patch.object(
+            vrm_client, "_request", return_value=mock_api_response
+        ):
+            stats = await vrm_client.installations.stats(random_site.id)
+
+            # Verify the structure exists
+            assert "records" in stats
+            assert "totals" in stats
+
+            records = stats["records"]
+            totals = stats["totals"]
+
+            # Verify false values were transformed to None
+            assert (
+                records["solar_yield_forecast"] is None
+            ), "solar_yield_forecast in records should be None, not False"
+            assert (
+                records["vrm_consumption_fc"] is None
+            ), "vrm_consumption_fc in records should be None, not False"
+            assert (
+                totals["solar_yield_forecast"] is None
+            ), "solar_yield_forecast in totals should be None, not False"
+            assert (
+                totals["vrm_consumption_fc"] is None
+            ), "vrm_consumption_fc in totals should be None, not False"
+
+            # Verify other values remain unchanged
+            assert records["some_other_field"] == [
+                1,
+                2,
+                3,
+            ], "Non-false values should remain unchanged"
+            assert (
+                totals["some_numeric_field"] == 123.45
+            ), "Non-false values should remain unchanged"
+
+            # Verify no False values exist anywhere
+            for key, value in records.items():
+                assert (
+                    value is not False
+                ), f"Records[{key}] should not be False after transformation"
+
+            for key, value in totals.items():
+                assert (
+                    value is not False
+                ), f"Totals[{key}] should not be False after transformation"
+
+            logger.info(
+                "Successfully verified false-to-None transformation in stats response"
+            )
+            return stats
+
+    except AuthorizationError as e:
+        logger.info(f"AuthorizationError received as expected: {e}")
+        return None
+    except VictronVRMError as e:
+        logger.warning(f"Error in mock test: {e}")
+        pytest.skip(f"Error in mock test: {e}")

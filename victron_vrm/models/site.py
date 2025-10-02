@@ -81,7 +81,7 @@ class Site(BaseModel):
     owner: Optional[bool] = Field(
         None, description="Whether user is owner of this site"
     )
-    invalid_vrm_auth_token_used_in_log_request: bool = Field(
+    invalid_vrm_auth_token_used_in_log_request: int = Field(
         ...,
         alias="invalidVRMAuthTokenUsedInLogRequest",
         description="Whether invalid VRM auth token was used in log request",
