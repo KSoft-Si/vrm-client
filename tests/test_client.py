@@ -1,11 +1,9 @@
 """Tests for the Victron Energy VRM API client."""
 
 import logging
-import traceback
 
 import aiohttp
 import pytest
-import httpx
 import random
 
 from victron_vrm import VictronVRMClient
