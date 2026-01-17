@@ -7,8 +7,9 @@ import pytest
 import random
 
 from victron_vrm import VictronVRMClient
-from victron_vrm.exceptions import VictronVRMError, AuthorizationError
+from victron_vrm.exceptions import VictronVRMError, AuthorizationError, NotFoundError, ClientError
 from victron_vrm.models import Site
+from victron_vrm.mqtt import VRMMQTTClient
 
 # Set up logging
 logging.basicConfig(
@@ -373,3 +374,121 @@ async def test_stats_false_to_none_transformation(vrm_client):
     except VictronVRMError as e:
         logger.warning(f"Error in mock test: {e}")
         pytest.skip(f"Error in mock test: {e}")
+
+
+@pytest.mark.asyncio
+async def test_get_mqtt_client_for_installation_success():
+    """Test getting MQTT client for a valid installation."""
+    import unittest.mock
+    from victron_vrm.models.auth import AuthToken
+    
+    # Create a mock client without needing actual network access
+    async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
+        # Mock the internal methods directly at asyncio.gather level
+        mock_token = AuthToken(
+            access_token="mock_access_token",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="read"
+        )
+        
+        # Create a minimal mock object with just the attributes we need
+        class MockUser:
+            email = "test@example.com"
+        
+        class MockSite:
+            identifier = "test-vrm-id"
+            mqtt_hostname = "mqtt.victronenergy.com"
+        
+        async def mock_gather(*args):
+            return mock_token, MockUser(), [MockSite()]
+        
+        # Mock asyncio.gather to avoid actual API calls
+        with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
+            # Get MQTT client
+            mqtt_client = await client.get_mqtt_client_for_installation(67890)
+            
+            # Verify the client is properly configured
+            assert mqtt_client is not None
+            assert isinstance(mqtt_client, VRMMQTTClient)
+            
+            # Verify client attributes
+            assert mqtt_client.host == "mqtt.victronenergy.com"
+            assert mqtt_client.username == "test@example.com"
+            assert mqtt_client.password == "Bearer mock_access_token"
+            assert mqtt_client.installation_id == "test-vrm-id"
+            
+            logger.info("Successfully created MQTT client with mocked data")
+
+
+@pytest.mark.asyncio
+async def test_get_mqtt_client_for_installation_not_found():
+    """Test getting MQTT client for a non-existent installation."""
+    import unittest.mock
+    from victron_vrm.models.auth import AuthToken
+    
+    # Create a mock client
+    async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
+        mock_token = AuthToken(
+            access_token="mock_access_token",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="read"
+        )
+        
+        class MockUser:
+            email = "test@example.com"
+        
+        async def mock_gather(*args):
+            # Return empty list for installations
+            return mock_token, MockUser(), []
+        
+        # Mock asyncio.gather to return empty installations list
+        with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
+            # Should raise NotFoundError
+            with pytest.raises(NotFoundError) as exc_info:
+                await client.get_mqtt_client_for_installation(999999999)
+            
+            # Verify the error message
+            assert "not found" in str(exc_info.value).lower()
+            assert "999999999" in str(exc_info.value)
+            
+            logger.info("NotFoundError correctly raised for invalid installation ID")
+
+
+@pytest.mark.asyncio
+async def test_get_mqtt_client_for_installation_missing_hostname():
+    """Test getting MQTT client for installation without MQTT hostname."""
+    import unittest.mock
+    from victron_vrm.models.auth import AuthToken
+    
+    # Create a mock client
+    async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
+        mock_token = AuthToken(
+            access_token="mock_access_token",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="read"
+        )
+        
+        class MockUser:
+            email = "test@example.com"
+        
+        class MockSite:
+            identifier = "test-vrm-id"
+            mqtt_hostname = None  # No MQTT hostname
+        
+        async def mock_gather(*args):
+            return mock_token, MockUser(), [MockSite()]
+        
+        # Mock asyncio.gather
+        with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
+            # Should raise ClientError
+            with pytest.raises(ClientError) as exc_info:
+                await client.get_mqtt_client_for_installation(67890)
+            
+            # Verify the error message
+            assert "mqtt hostname" in str(exc_info.value).lower()
+            assert "67890" in str(exc_info.value)
+            
+            logger.info("ClientError correctly raised for installation without MQTT hostname")
