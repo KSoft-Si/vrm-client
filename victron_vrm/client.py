@@ -508,8 +508,13 @@ class VictronVRMClient:
 
         Args:
             installation_id: Installation ID
+
         Returns:
             VRMMQTTClient: MQTT client for the installation
+
+        Raises:
+            NotFoundError: If no installation with the given ID is found for the user.
+            ClientError: If the installation does not have an MQTT hostname configured.
         """
         token, user_details, installations = await asyncio.gather(
             self._get_auth_token(),
