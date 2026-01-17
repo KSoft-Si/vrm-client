@@ -1008,19 +1008,19 @@ wheels = [
 
 [[package]]
 name = "victron-mqtt"
-version = "2026.1.2"
+version = "2026.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "paho-mqtt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/6f/23d93a981cd2067446f5ac085a973d2c7575f8605b96e4a7ee8bac72817b/victron_mqtt-2026.1.2.tar.gz", hash = "sha256:dcf8f763c5e803191e270e72a2d51cc20f4457b8c331f10d05f7790ea3f91e2f", size = 113109, upload-time = "2026-01-08T15:29:16.649Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/56/bb7c6f89596fe216de81c0a409b8a0ff2299a9da0743c396d8b0aee7a755/victron_mqtt-2026.1.4.tar.gz", hash = "sha256:caf9acf69df5913c612c2f0cc83da206c239c6ad10a4d6c3bb0325c2640d837e", size = 115249, upload-time = "2026-01-17T20:32:55.038Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/78/2ab20828bad7caafb5279881ab3dbbfd82960128bd49f9050185d4d1ac08/victron_mqtt-2026.1.2-py3-none-any.whl", hash = "sha256:d21afbe0deab3b39377a8e0121c31d622ede78d87ce85e350ec6bbdcb77cdd3a", size = 66020, upload-time = "2026-01-08T15:29:15.162Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/55/b68592f50828d6b73b29a949977f6e4ff0a35d7048de97faa13d372366a4/victron_mqtt-2026.1.4-py3-none-any.whl", hash = "sha256:e7d4b064d21bccbe37d8a26f84ef80bd0e043ba3c84194940f98d6cd946df2bf", size = 66757, upload-time = "2026-01-17T20:32:53.837Z" },
 ]
 
 [[package]]
 name = "victron-vrm"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp", extra = ["speedups"] },
@@ -1056,7 +1056,7 @@ requires-dist = [
     { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.0" },
-    { name = "victron-mqtt", specifier = "==2026.1.2" },
+    { name = "victron-mqtt", specifier = "==2026.1.4" },
 ]
 provides-extras = ["test", "dev"]
 
