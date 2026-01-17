@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Literal
 
 import aiohttp
 from pydantic import ValidationError
+from victron_mqtt import OperationMode
 
 from victron_vrm.mqtt import VRMMQTTClient
 
@@ -503,11 +504,15 @@ class VictronVRMClient:
     async def get_mqtt_client_for_installation(
         self,
         installation_id: int,
+        update_frequency: int | None = None,
+        operation_mode: OperationMode = OperationMode.FULL,
     ) -> "VRMMQTTClient":
         """Get an MQTT client for the specified installation.
 
         Args:
             installation_id: Installation ID
+            update_frequency: Update frequency in seconds (0-3600)
+            operation_mode: Operation mode for the MQTT client
 
         Returns:
             VRMMQTTClient: MQTT client for the installation
@@ -541,4 +546,6 @@ class VictronVRMClient:
             username=mqtt_username,
             password=mqtt_password,
             vrm_id=installation.identifier,
+            update_frequency=update_frequency,
+            operation_mode=operation_mode,
         )
