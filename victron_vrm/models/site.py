@@ -3,26 +3,38 @@
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from .base import BaseModel
 
 
-class SitePerrmission(BaseModel):
+class SitePermission(BaseModel):
     """Victron Energy site view permissions model."""
 
-    update_settings: bool
-    settings: bool
-    diagnostics: bool
-    share: bool
-    vnc: bool
-    mqtt_rpc: bool
-    vebus: bool
-    two_way: bool = Field(..., alias="twoway")
-    exact_location: bool
-    nodered: bool
-    nodered_dash: bool
-    signalk: bool
+    model_config = ConfigDict(extra="allow")
+
+    update_settings: bool | None = None
+    settings: bool | None = None
+    diagnostics: bool | None = None
+    share: bool | None = None
+    vnc: bool | None = None
+    rc_classic: bool | None = None
+    rc_gui_v2: bool | None = None
+    rc_gui_v2_extra_arguments: bool | None = None
+    mqtt_rpc: bool | None = None
+    vebus: bool | None = None
+    two_way: bool | None = Field(None, alias="twoway")
+    readonly_realtime: bool | None = None
+    exact_location: bool | None = None
+    nodered: bool | None = None
+    nodered_dash: bool | None = None
+    nodered_dash_v2: bool | None = None
+    signalk: bool | None = None
+    paygo: bool | None = None
+    dess_config: bool | None = None
+    dess_view: bool | None = None
+    can_alter_installation: bool | None = Field(None, alias="canAlterInstallation")
+    can_see_group_and_team_members: bool | None = None
 
 
 class SiteImage(BaseModel):
@@ -38,7 +50,7 @@ class SiteTag(BaseModel):
 
     id: int = Field(..., alias="idTag", description="Tag ID")
     name: str = Field(..., description="Tag name")
-    automatic: str = Field(..., description="If tag is automatic")
+    automatic: bool | str = Field(..., description="If tag is automatic")
 
 
 class Site(BaseModel):
@@ -112,7 +124,7 @@ class Site(BaseModel):
         None, alias="mqttWebhost", description="MQTT web host"
     )
     mqtt_hostname: Optional[str] = Field(
-        None, alias="mqttHost", description="MQTT hostname"
+        None, alias="mqtt_host", description="MQTT hostname"
     )
     high_workload: Optional[bool] = Field(
         None, alias="highWorkload", description="Whether high workload is enabled"
@@ -129,10 +141,12 @@ class Site(BaseModel):
     tags: Optional[List[SiteTag]] = Field(
         [], description="List of tags associated with the site"
     )
-    images: Optional[List[SiteImage]] = Field(
+    # API output inconsistency: sometimes a list is returned, sometimes a boolean
+    images: Optional[List[SiteImage] | bool] = Field(
         [], description="List of images associated with the site"
     )
-    view_permissions: Optional[List[SitePerrmission]] = Field([])
+    # API output inconsistency: sometimes a list is returned, sometimes a dict
+    view_permissions: Optional[List[SitePermission] | SitePermission] = Field([])
     extended: Optional[List[Dict[str, Any]]] = Field(
         [], description="Extended information about the site"
     )

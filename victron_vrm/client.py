@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Literal
 import aiohttp
 from pydantic import ValidationError
 
+from victron_vrm.mqtt import VRMMQTTClient
+
 from .consts import AUTH_URL, USER_ME_URL, FILTERED_SORTED_ATTRIBUTES_URL, BASE_URL
 from .exceptions import (
     AuthenticationError,
@@ -497,3 +499,46 @@ class VictronVRMClient:
     def installations(self) -> "InstallationsModule":
         """Get the InstallationsModule."""
         return InstallationsModule(self)
+
+    async def get_mqtt_client_for_installation(
+        self,
+        installation_id: int,
+    ) -> "VRMMQTTClient":
+        """Get an MQTT client for the specified installation.
+
+        Args:
+            installation_id: Installation ID
+
+        Returns:
+            VRMMQTTClient: MQTT client for the installation
+
+        Raises:
+            NotFoundError: If no installation with the given ID is found for the user.
+            ClientError: If the installation does not have an MQTT hostname configured.
+        """
+        token, user_details, installations = await asyncio.gather(
+            self._get_auth_token(),
+            self.users.get_me(),
+            self.users.list_sites(extended=True, site_id=installation_id),
+        )
+        mqtt_username = user_details.email
+        mqtt_password = token.authorization_header
+
+        if len(installations) == 0:
+            raise NotFoundError(
+                f"Installation with ID {installation_id} not found for user.",
+            )
+        installation = installations[0]
+
+        # Check if MQTT hostname is available
+        if not installation.mqtt_hostname:
+            raise ClientError(
+                f"Installation with ID {installation_id} does not have MQTT hostname configured.",
+            )
+
+        return VRMMQTTClient(
+            host=installation.mqtt_hostname,
+            username=mqtt_username,
+            password=mqtt_password,
+            vrm_id=installation.identifier,
+        )

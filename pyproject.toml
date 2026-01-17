@@ -5,12 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "victron-vrm"
 version = "0.1.8"
-description = "Async Python client for the Victron Energy VRM API"
+description = "Async Python client for the Victron Energy VRM API and MQTT client for VRM"
 readme = "README.md"
 requires-python = ">=3.11"
 keywords = [ "victron", "vrm", "api", "client", "async", "home-assistant",]
 classifiers = [ "Development Status :: 4 - Beta", "Intended Audience :: Developers", "License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Topic :: Home Automation", "Topic :: Software Development :: Libraries",]
-dependencies = [ "pydantic>=2.0.0", "aiohttp[speedups]>=3.8.0", "pytz>=2025.2",]
+dependencies = [
+ "pydantic>=2.0.0",
+ "aiohttp[speedups]>=3.8.0",
+ "pytz>=2025.2",
+ "victron-mqtt==2026.1.2",
+]
 [[project.authors]]
 name = "AndyTempel"
 
@@ -23,7 +28,7 @@ text = "MIT"
 
 [project.optional-dependencies]
 test = [ "pytest>=7.0.0", "pytest-asyncio>=0.20.0", "pytest-cov>=4.0.0",]
-dev = [ "black>=23.0.0", "isort>=5.0.0", "mypy>=1.0.0", "ruff>=0.0.0",]
+dev = [ "black>=23.0.0", "isort>=5.0.0", "mypy>=1.0.0", "ruff>=0.0.0", "python-dotenv>=1.0.0",]
 
 [project.urls]
 Homepage = "https://github.com/KSoft-Si/vrm-client"
