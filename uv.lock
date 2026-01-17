@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -605,6 +605,15 @@ wheels = [
 ]
 
 [[package]]
+name = "paho-mqtt"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/39/15/0a6214e76d4d32e7f663b109cf71fb22561c2be0f701d67f93950cd40542/paho_mqtt-2.1.0.tar.gz", hash = "sha256:12d6e7511d4137555a3f6ea167ae846af2c7357b10bc6fa4f7c3968fc1723834", size = 148848, upload-time = "2024-04-29T19:52:55.591Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/cb/00451c3cf31790287768bb12c6bec834f5d292eaf3022afc88e14b8afc94/paho_mqtt-2.1.0-py3-none-any.whl", hash = "sha256:6db9ba9b34ed5bc6b6e3812718c7e06e2fd7444540df2455d2c51bd58808feee", size = 67219, upload-time = "2024-04-29T19:52:48.345Z" },
+]
+
+[[package]]
 name = "pathspec"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -895,6 +904,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/26/19cadc79a718c5edbec86fd4919a6b6d3f681039a2f6d66d14be94e75fb9/python_dotenv-1.2.1.tar.gz", hash = "sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6", size = 44221, upload-time = "2025-10-26T15:12:10.434Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl", hash = "sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61", size = 21230, upload-time = "2025-10-26T15:12:09.109Z" },
+]
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -989,13 +1007,26 @@ wheels = [
 ]
 
 [[package]]
+name = "victron-mqtt"
+version = "2026.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "paho-mqtt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/84/6f/23d93a981cd2067446f5ac085a973d2c7575f8605b96e4a7ee8bac72817b/victron_mqtt-2026.1.2.tar.gz", hash = "sha256:dcf8f763c5e803191e270e72a2d51cc20f4457b8c331f10d05f7790ea3f91e2f", size = 113109, upload-time = "2026-01-08T15:29:16.649Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ea/78/2ab20828bad7caafb5279881ab3dbbfd82960128bd49f9050185d4d1ac08/victron_mqtt-2026.1.2-py3-none-any.whl", hash = "sha256:d21afbe0deab3b39377a8e0121c31d622ede78d87ce85e350ec6bbdcb77cdd3a", size = 66020, upload-time = "2026-01-08T15:29:15.162Z" },
+]
+
+[[package]]
 name = "victron-vrm"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp", extra = ["speedups"] },
     { name = "pydantic" },
     { name = "pytz" },
+    { name = "victron-mqtt" },
 ]
 
 [package.optional-dependencies]
@@ -1003,6 +1034,7 @@ dev = [
     { name = "black" },
     { name = "isort" },
     { name = "mypy" },
+    { name = "python-dotenv" },
     { name = "ruff" },
 ]
 test = [
@@ -1021,8 +1053,10 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.20.0" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.0.0" },
+    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.0" },
+    { name = "victron-mqtt", specifier = "==2026.1.2" },
 ]
 provides-extras = ["test", "dev"]
 
