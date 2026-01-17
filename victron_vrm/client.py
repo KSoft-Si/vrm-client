@@ -511,7 +511,7 @@ class VictronVRMClient:
 
         Args:
             installation_id: Installation ID
-            update_frequency: Update frequency in seconds (0-300)
+            update_frequency: Update frequency in seconds (0-3600)
             operation_mode: Operation mode for the MQTT client
 
         Returns:
@@ -546,4 +546,6 @@ class VictronVRMClient:
             username=mqtt_username,
             password=mqtt_password,
             vrm_id=installation.identifier,
+            update_frequency=update_frequency,
+            operation_mode=operation_mode,
         )
