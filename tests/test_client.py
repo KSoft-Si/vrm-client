@@ -1,6 +1,7 @@
 """Tests for the Victron Energy VRM API client."""
 
 import logging
+import unittest.mock
 
 import aiohttp
 import pytest
@@ -9,6 +10,7 @@ import random
 from victron_vrm import VictronVRMClient
 from victron_vrm.exceptions import VictronVRMError, AuthorizationError, NotFoundError, ClientError
 from victron_vrm.models import Site
+from victron_vrm.models.auth import AuthToken
 from victron_vrm.mqtt import VRMMQTTClient
 
 # Set up logging
@@ -20,6 +22,34 @@ logger = logging.getLogger(__name__)
 
 # Constants
 AUTH_DEMO_URL = "https://vrmapi.victronenergy.com/v2/auth/loginAsDemo"
+
+
+# Helper classes for mocking
+class _MockUser:
+    """Mock user for testing."""
+    email = "test@example.com"
+
+
+class _MockSite:
+    """Mock site for testing."""
+    identifier = "test-vrm-id"
+    mqtt_hostname = "mqtt.victronenergy.com"
+
+
+class _MockSiteNoHostname:
+    """Mock site without MQTT hostname for testing."""
+    identifier = "test-vrm-id"
+    mqtt_hostname = None
+
+
+def _create_mock_token():
+    """Create a mock auth token for testing."""
+    return AuthToken(
+        access_token="mock_access_token",
+        token_type="Bearer",
+        expires_in=3600,
+        scope="read"
+    )
 
 
 @pytest.fixture(scope="session")
@@ -379,29 +409,10 @@ async def test_stats_false_to_none_transformation(vrm_client):
 @pytest.mark.asyncio
 async def test_get_mqtt_client_for_installation_success():
     """Test getting MQTT client for a valid installation."""
-    import unittest.mock
-    from victron_vrm.models.auth import AuthToken
-    
     # Create a mock client without needing actual network access
     async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
-        # Mock the internal methods directly at asyncio.gather level
-        mock_token = AuthToken(
-            access_token="mock_access_token",
-            token_type="Bearer",
-            expires_in=3600,
-            scope="read"
-        )
-        
-        # Create a minimal mock object with just the attributes we need
-        class MockUser:
-            email = "test@example.com"
-        
-        class MockSite:
-            identifier = "test-vrm-id"
-            mqtt_hostname = "mqtt.victronenergy.com"
-        
         async def mock_gather(*args):
-            return mock_token, MockUser(), [MockSite()]
+            return _create_mock_token(), _MockUser(), [_MockSite()]
         
         # Mock asyncio.gather to avoid actual API calls
         with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
@@ -424,24 +435,11 @@ async def test_get_mqtt_client_for_installation_success():
 @pytest.mark.asyncio
 async def test_get_mqtt_client_for_installation_not_found():
     """Test getting MQTT client for a non-existent installation."""
-    import unittest.mock
-    from victron_vrm.models.auth import AuthToken
-    
     # Create a mock client
     async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
-        mock_token = AuthToken(
-            access_token="mock_access_token",
-            token_type="Bearer",
-            expires_in=3600,
-            scope="read"
-        )
-        
-        class MockUser:
-            email = "test@example.com"
-        
         async def mock_gather(*args):
             # Return empty list for installations
-            return mock_token, MockUser(), []
+            return _create_mock_token(), _MockUser(), []
         
         # Mock asyncio.gather to return empty installations list
         with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
@@ -459,27 +457,10 @@ async def test_get_mqtt_client_for_installation_not_found():
 @pytest.mark.asyncio
 async def test_get_mqtt_client_for_installation_missing_hostname():
     """Test getting MQTT client for installation without MQTT hostname."""
-    import unittest.mock
-    from victron_vrm.models.auth import AuthToken
-    
     # Create a mock client
     async with VictronVRMClient(token="mock_token", token_type="Bearer") as client:
-        mock_token = AuthToken(
-            access_token="mock_access_token",
-            token_type="Bearer",
-            expires_in=3600,
-            scope="read"
-        )
-        
-        class MockUser:
-            email = "test@example.com"
-        
-        class MockSite:
-            identifier = "test-vrm-id"
-            mqtt_hostname = None  # No MQTT hostname
-        
         async def mock_gather(*args):
-            return mock_token, MockUser(), [MockSite()]
+            return _create_mock_token(), _MockUser(), [_MockSiteNoHostname()]
         
         # Mock asyncio.gather
         with unittest.mock.patch("asyncio.gather", side_effect=mock_gather):
