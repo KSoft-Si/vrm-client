@@ -40,6 +40,7 @@ class VRMMQTTClient(VictronMQTTHub):
         # Safe update_frequency values between 0 and 3600 seconds
         if isinstance(update_frequency, int):
             update_frequency = max(0, min(update_frequency, 3600))
+        self._vrm_id = vrm_id
         super().__init__(
             host=host,
             username=username,
@@ -50,3 +51,9 @@ class VRMMQTTClient(VictronMQTTHub):
             update_frequency_seconds=update_frequency,
             operation_mode=operation_mode,
         )
+
+    @property
+    def installation_id(self) -> str | None:
+        """Return the installation ID, falling back to the configured VRM ID."""
+        return super().installation_id or self._vrm_id
+
