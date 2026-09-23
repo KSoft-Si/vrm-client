@@ -1,6 +1,6 @@
 import datetime
-from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from victron_vrm.utils import is_dt_timezone_aware
 
@@ -14,6 +14,7 @@ class ForecastAggregations:
     site_id: int
     records: list[tuple[int, float]]
     custom_dt_now: Callable[[], datetime.datetime] | None = None
+    time_zone: datetime.tzinfo | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         """Post-initialize the ForecastEstimates class."""
@@ -52,15 +53,31 @@ class ForecastAggregations:
             for x, y in self.records
         }
 
+    def _local_day_range(
+        self, day_offset: int, time_zone: datetime.tzinfo
+    ) -> tuple[int, int]:
+        day = self.dt_now.astimezone(time_zone).date() + datetime.timedelta(
+            days=day_offset
+        )
+        start = datetime.datetime.combine(day, datetime.time.min, time_zone)
+        end = datetime.datetime.combine(
+            day + datetime.timedelta(days=1), datetime.time.min, time_zone
+        )
+        return int(start.timestamp()), int(end.timestamp())
+
     @property
     def yesterday_range(self) -> tuple[int, int]:
         """Get the range of yesterday."""
+        if self.time_zone is not None:
+            return self._local_day_range(-1, self.time_zone)
         end = self.start + (3600 * 24)
         return self.start, end
 
     @property
     def today_range(self) -> tuple[int, int]:
         """Get the range of today."""
+        if self.time_zone is not None:
+            return self._local_day_range(0, self.time_zone)
         start = self.start + (3600 * 24)
         end = start + (3600 * 24)
         return start, end
@@ -68,6 +85,8 @@ class ForecastAggregations:
     @property
     def tomorrow_range(self) -> tuple[int, int]:
         """Get the range of tomorrow."""
+        if self.time_zone is not None:
+            return self._local_day_range(1, self.time_zone)
         start = self.start + (3600 * 48)
         end = start + (3600 * 24)
         return start, end
@@ -102,6 +121,8 @@ class ForecastAggregations:
     def today_left_range(self) -> tuple[int, int]:
         """Get the range of today left."""
         start = int(self.dt_now.timestamp())
+        if self.time_zone is not None:
+            return start, self.today_range[1]
         end = int(
             (
                 self.dt_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -131,15 +152,14 @@ class ForecastAggregations:
     @property
     def yesterday_peak_time(self) -> datetime.datetime:
         """Get the peak time for yesterday."""
-        return sorted(
+        return max(
             [
                 (datetime.datetime.fromtimestamp(x, tz=datetime.UTC), y)
                 for x, y in self.records
                 if self.yesterday_range[0] <= x < self.yesterday_range[1]
             ],
             key=lambda x: x[1],
-            reverse=True,
-        )[0][0]
+        )[0]
 
     @property
     def today_total(self) -> float:
@@ -160,15 +180,14 @@ class ForecastAggregations:
     @property
     def today_peak_time(self) -> datetime.datetime:
         """Get the peak time for today."""
-        return sorted(
+        return max(
             [
                 (datetime.datetime.fromtimestamp(x, tz=datetime.UTC), y)
                 for x, y in self.records
                 if self.today_range[0] <= x < self.today_range[1]
             ],
             key=lambda x: x[1],
-            reverse=True,
-        )[0][0]
+        )[0]
 
     @property
     def today_left_total(self) -> float:
@@ -200,15 +219,14 @@ class ForecastAggregations:
     @property
     def tomorrow_peak_time(self) -> datetime.datetime:
         """Get the peak time for tomorrow."""
-        return sorted(
+        return max(
             [
                 (datetime.datetime.fromtimestamp(x, tz=datetime.UTC), y)
                 for x, y in self.records
                 if self.tomorrow_range[0] <= x < self.tomorrow_range[1]
             ],
             key=lambda x: x[1],
-            reverse=True,
-        )[0][0]
+        )[0]
 
     @property
     def current_hour_total(self) -> float:

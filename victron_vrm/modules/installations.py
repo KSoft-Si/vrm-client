@@ -1,13 +1,13 @@
-from datetime import datetime
-from typing import Literal, Any
+from datetime import datetime, tzinfo
+from typing import Any, Literal
 
 import pytz
 
-from ._base import BaseClientModule
 from .. import consts
-from ..models import Site, Alarms, AlarmSettings
+from ..models import Alarms, AlarmSettings, Site
 from ..models.aggregations import ForecastAggregations
 from ..utils import is_dt_timezone_aware
+from ._base import BaseClientModule
 
 
 class InstallationsModule(BaseClientModule):
@@ -182,6 +182,7 @@ class InstallationsModule(BaseClientModule):
         ] = "live_feed",
         attribute_codes: list[str] | None = None,
         return_aggregations: bool = False,
+        time_zone: tzinfo | None = None,
     ) -> (
         dict[Literal["records", "totals"], dict]
         | dict[Literal["solar_yield", "consumption"], ForecastAggregations | None]
@@ -196,11 +197,12 @@ class InstallationsModule(BaseClientModule):
         :param type: The type of statistics to retrieve.
         :param attribute_codes: Optional list of attribute codes to filter the statistics.
         :param return_aggregations: Whether to return a ForecastAggregations object (only valid when type is 'forecast').
+        :param time_zone: Optional time zone for forecast day boundaries.
         :return: A dictionary containing the statistics.
         """
-        assert (
-            type == "forecast" or not return_aggregations
-        ), "return_aggregations can only be True when type is 'forecast'"
+        assert type == "forecast" or not return_aggregations, (
+            "return_aggregations can only be True when type is 'forecast'"
+        )
         if isinstance(site_id, Site):
             site_id = site_id.id
 
@@ -256,6 +258,7 @@ class InstallationsModule(BaseClientModule):
                         records=[
                             (int(x / 1000), y) for x, y in request["records"][key]
                         ],
+                        time_zone=time_zone,
                     )
                 else:
                     payload[map_key] = None
