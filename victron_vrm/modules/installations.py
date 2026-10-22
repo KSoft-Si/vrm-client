@@ -43,6 +43,7 @@ class InstallationsModule(BaseClientModule):
             method="POST",
             url=f"{self.BASE_URL}/{site_id}/alarms",
             json_data=alarm.model_dump(by_alias=True),
+            idempotent=False,
         )
 
     async def delete_alarm(self, site_id: int | Site, alarm: AlarmSettings) -> None:

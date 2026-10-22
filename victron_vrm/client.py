@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+import random
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Literal
 
@@ -42,6 +43,8 @@ class VictronVRMClient:
     """Client for the Victron Energy VRM API."""
 
     USER_AGENT = "VictronVRMClient/1.0 Contact/user-first-otherwise/oss@ksoft.tech"
+    # Longest Retry-After (seconds) we are willing to sleep before giving up on a 429
+    MAX_RETRY_AFTER = 120
 
     def __init__(
         self,
@@ -65,7 +68,7 @@ class VictronVRMClient:
             token_type: Token type, either 'Bearer' or 'Token' (default: 'Bearer')
             client_session: Optional aiohttp ClientSession
             request_timeout: Request timeout in seconds
-            max_retries: Maximum number of retries for failed requests
+            max_retries: Maximum number of attempts per request, including the first
             retry_delay: Delay between retries in seconds
         """
         if not ((username and password and client_id) or token):
@@ -91,6 +94,7 @@ class VictronVRMClient:
         self._max_retries = max_retries
         self._retry_delay = retry_delay
         self._auth_token: Optional[AuthToken] = None
+        self._auth_lock = asyncio.Lock()
         self._close_session = False
         self._user_id: Optional[int] = None
         self._filtered_sorted_attributes: Optional[VRMAttributes] = None
@@ -100,6 +104,10 @@ class VictronVRMClient:
         if url.startswith("http://") or url.startswith("https://"):
             return url
         return f"{BASE_URL.rstrip('/')}/{url.lstrip('/')}"
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Linear backoff with jitter so concurrent clients don't retry in lockstep."""
+        return self._retry_delay * (attempt + 1) * random.uniform(0.5, 1.5)
 
     async def __aenter__(self) -> "VictronVRMClient":
         """Async enter."""
@@ -137,6 +145,14 @@ class VictronVRMClient:
         if self._auth_token and not self._auth_token.is_expired:
             return self._auth_token
 
+        # Serialize token fetches so concurrent requests share a single login
+        async with self._auth_lock:
+            if self._auth_token and not self._auth_token.is_expired:
+                return self._auth_token
+            return await self._fetch_auth_token()
+
+    async def _fetch_auth_token(self) -> AuthToken:
+        """Create or fetch a new authentication token. Caller must hold _auth_lock."""
         if not self._client_session:
             self._client_session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=self._request_timeout)
@@ -166,46 +182,69 @@ class VictronVRMClient:
             "client_id": self._client_id,
         }
 
-        try:
-            async with self._client_session.post(
-                self._build_url(AUTH_URL),
-                data=auth_data,
-                headers={
-                    "User-Agent": self.USER_AGENT,
-                },
-            ) as response:
-                text = await response.text()
-                status_code = response.status
-                # Try to parse JSON if present
-                try:
-                    payload = json.loads(text) if text else {}
-                except json.JSONDecodeError:
-                    payload = {"raw": text}
+        attempts = max(1, self._max_retries)
+        for attempt in range(attempts):
+            can_retry = attempt < attempts - 1
+            try:
+                async with self._client_session.post(
+                    self._build_url(AUTH_URL),
+                    data=auth_data,
+                    headers={
+                        "User-Agent": self.USER_AGENT,
+                    },
+                ) as response:
+                    text = await response.text()
+                    status_code = response.status
+                    # Try to parse JSON if present
+                    try:
+                        payload = json.loads(text) if text else {}
+                    except json.JSONDecodeError:
+                        payload = {"raw": text}
 
-                if 200 <= status_code < 300:
-                    if not isinstance(payload, dict):
-                        raise ParseError(
-                            f"Expected JSON object for auth response, got: {type(payload)}"
+                    if 200 <= status_code < 300:
+                        if not isinstance(payload, dict):
+                            raise ParseError(
+                                f"Expected JSON object for auth response, got: {type(payload)}"
+                            )
+                        self._auth_token = AuthToken(**payload)
+                        return self._auth_token
+                    # Transient failures are worth another login attempt
+                    if can_retry and (status_code == 429 or status_code >= 500):
+                        _LOGGER.debug(
+                            "Auth returned %s, retrying (attempt %s)",
+                            status_code,
+                            attempt + 1,
                         )
-                    self._auth_token = AuthToken(**payload)
-                    return self._auth_token
-                # Non-2xx -> build error
-                error_message = (
-                    payload.get("error")
-                    if isinstance(payload, dict)
-                    else (text or "Authentication failed")
-                )
-                raise AuthenticationError(
-                    f"Authentication failed: {error_message}",
-                    status_code=status_code,
-                    response_data=(
-                        payload if isinstance(payload, dict) else {"raw": text}
-                    ),
-                )
-        except aiohttp.ClientError as err:
-            raise ConnectionError(f"Connection error: {err}") from err
-        except ValidationError as err:
-            raise ParseError(f"Failed to parse authentication response: {err}") from err
+                        await asyncio.sleep(self._backoff_delay(attempt))
+                        continue
+                    # Non-2xx -> build error
+                    error_message = (
+                        payload.get("error")
+                        if isinstance(payload, dict)
+                        else (text or "Authentication failed")
+                    )
+                    raise AuthenticationError(
+                        f"Authentication failed: {error_message}",
+                        status_code=status_code,
+                        response_data=(
+                            payload if isinstance(payload, dict) else {"raw": text}
+                        ),
+                    )
+            except aiohttp.ClientError as err:
+                if can_retry:
+                    await asyncio.sleep(self._backoff_delay(attempt))
+                    continue
+                raise ConnectionError(f"Connection error: {err}") from err
+            except asyncio.TimeoutError:
+                if can_retry:
+                    await asyncio.sleep(self._backoff_delay(attempt))
+                    continue
+                raise
+            except ValidationError as err:
+                raise ParseError(f"Failed to parse authentication response: {err}") from err
+
+        # Unreachable: the final attempt always returns or raises
+        raise AuthenticationError("Authentication failed: maximum retries exceeded")
 
     async def _get_user_id(self) -> int:
         """Get the user ID from the /users/me endpoint.
@@ -239,6 +278,7 @@ class VictronVRMClient:
         headers: Optional[Dict[str, str]] = None,
         auth_required: bool = True,
         skip_success_check: bool = False,
+        idempotent: bool = True,
     ) -> Dict[str, Any]:
         """Make an API request.
 
@@ -250,6 +290,9 @@ class VictronVRMClient:
             json_data: JSON data
             headers: Request headers
             auth_required: Whether authentication is required
+            idempotent: Whether the request is safe to repeat. When False, it is only
+                retried if the server cannot have processed it (429, failed connect),
+                not after timeouts or server errors, to avoid duplicate side effects.
 
         Returns:
             Dict[str, Any]: Response data
@@ -263,16 +306,13 @@ class VictronVRMClient:
             )
             self._close_session = True
 
-        if not headers:
-            headers = {}
+        # Copy so the caller's dict is never mutated
+        headers = dict(headers) if headers else {}
 
         if params:
             # Remove None values from params
             params = {k: v for k, v in params.items() if v is not None}
 
-        if auth_required:
-            token = await self._get_auth_token()
-            headers["X-Authorization"] = token.authorization_header
         headers["User-Agent"] = self.USER_AGENT
 
         request_headers = headers or {}
@@ -282,7 +322,12 @@ class VictronVRMClient:
 
         full_url = self._build_url(url)
 
-        for attempt in range(self._max_retries):
+        attempts = max(1, self._max_retries)
+        for attempt in range(attempts):
+            if auth_required:
+                # Resolved per attempt so a retry after 401 uses a refreshed token
+                token = await self._get_auth_token()
+                request_headers["X-Authorization"] = token.authorization_header
             try:
                 async with self._client_session.request(
                     method,
@@ -339,7 +384,11 @@ class VictronVRMClient:
                         )
 
                     if status_code == 401:
-                        if auth_required and attempt < self._max_retries - 1:
+                        if (
+                            auth_required
+                            and not self._token
+                            and attempt < attempts - 1
+                        ):
                             self._auth_token = None
                             await asyncio.sleep(self._retry_delay)
                             continue
@@ -373,10 +422,10 @@ class VictronVRMClient:
                             ),
                         )
                     elif status_code == 429:
-                        if attempt < self._max_retries - 1:
+                        if attempt < attempts - 1:
                             # retry-after header or backoff
                             retry_after_hdr = response.headers.get("Retry-After")
-                            retry_after: int
+                            retry_after: float
                             if retry_after_hdr and retry_after_hdr.isdigit():
                                 retry_after = int(retry_after_hdr)
                             else:
@@ -392,19 +441,27 @@ class VictronVRMClient:
                                     now = (
                                         datetime.now(tz=dt.tzinfo)
                                         if dt.tzinfo
-                                        else datetime.utcnow()
+                                        else datetime.now(timezone.utc).replace(
+                                            tzinfo=None
+                                        )
                                     )
                                     delta = (dt - now).total_seconds()
                                     retry_after = max(0, int(delta))
                                 else:
-                                    retry_after = self._retry_delay
+                                    retry_after = self._backoff_delay(attempt)
+                            if retry_after <= self.MAX_RETRY_AFTER:
+                                _LOGGER.debug(
+                                    "429 received, retrying after %s seconds (attempt %s)",
+                                    retry_after,
+                                    attempt + 1,
+                                )
+                                await asyncio.sleep(retry_after)
+                                continue
                             _LOGGER.debug(
-                                "429 received, retrying after %s seconds (attempt %s)",
+                                "429 received, Retry-After %s exceeds %s seconds, giving up",
                                 retry_after,
-                                attempt + 1,
+                                self.MAX_RETRY_AFTER,
                             )
-                            await asyncio.sleep(retry_after)
-                            continue
                         raise RateLimitError(
                             f"Rate limit exceeded: {error_message}",
                             status_code=status_code,
@@ -425,8 +482,8 @@ class VictronVRMClient:
                             ),
                         )
                     elif 500 <= status_code < 600:
-                        if attempt < self._max_retries - 1:
-                            await asyncio.sleep(self._retry_delay * (attempt + 1))
+                        if idempotent and attempt < attempts - 1:
+                            await asyncio.sleep(self._backoff_delay(attempt))
                             continue
                         raise ServerError(
                             f"Server error: {error_message}",
@@ -448,18 +505,22 @@ class VictronVRMClient:
                             ),
                         )
             except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as err:
-                if attempt < self._max_retries - 1:
+                if idempotent and attempt < attempts - 1:
                     _LOGGER.debug(
                         "Timeout on %s %s, retrying (attempt %s)",
                         method,
                         full_url,
                         attempt + 1,
                     )
-                    await asyncio.sleep(self._retry_delay * (attempt + 1))
+                    await asyncio.sleep(self._backoff_delay(attempt))
                     continue
                 raise TimeoutError(f"Request timed out: {err}") from err
             except aiohttp.ClientError as err:
-                if attempt < self._max_retries - 1:
+                # A failed connect never reached the server, so it is always safe to retry
+                retry_safe = idempotent or isinstance(
+                    err, aiohttp.ClientConnectorError
+                )
+                if retry_safe and attempt < attempts - 1:
                     _LOGGER.debug(
                         "ClientError on %s %s, retrying (attempt %s): %s",
                         method,
@@ -467,7 +528,7 @@ class VictronVRMClient:
                         attempt + 1,
                         err,
                     )
-                    await asyncio.sleep(self._retry_delay * (attempt + 1))
+                    await asyncio.sleep(self._backoff_delay(attempt))
                     continue
                 raise ConnectionError(f"Connection error: {err}") from err
             except VictronVRMError:

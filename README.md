@@ -129,7 +129,7 @@ VictronVRMClient(
     client_id: Optional[str] = None,
     token: Optional[str] = None,
     token_type: str = "Bearer",
-    client_session: Optional[httpx.AsyncClient] = None,
+    client_session: Optional[aiohttp.ClientSession] = None,
     request_timeout: int = 10,
     max_retries: int = 3,
     retry_delay: int = 1,
@@ -137,6 +137,10 @@ VictronVRMClient(
 ```
 
 Either `username`, `password`, and `client_id` OR `token` must be provided. The `token_type` can be either "Bearer" (for JWT tokens) or "Token" (for access tokens).
+
+#### Retries
+
+`max_retries` is the total number of attempts per request (at least one is always made). Timeouts, connection errors and 5xx responses are retried with linear backoff (`retry_delay * attempt`) plus random jitter, so many clients hitting the API at once don't retry in lockstep. Rate-limited (429) requests wait for the server's `Retry-After` when present, and fail with `RateLimitError` immediately if it asks for more than 120 seconds. Requests that create something (`add_site`, `create_access_token`, `add_alarm`) are not retried after a timeout or server error, to avoid creating duplicates. Username/password logins are retried on transient errors and shared between concurrent requests.
 
 ### Available Modules
 

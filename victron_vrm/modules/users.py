@@ -31,6 +31,7 @@ class UsersModule(BaseClientModule):
             json_data={
                 "installation_identifier": installation_identifier,
             },
+            idempotent=False,
         )
         return request["records"]
 
@@ -91,6 +92,7 @@ class UsersModule(BaseClientModule):
             method="POST",
             url=f"{self.BASE_URL}/{await self._client._get_user_id()}/accesstokens/create",
             json_data=payload,
+            idempotent=False,
         )
         return request["token"]
 
